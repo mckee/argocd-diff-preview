@@ -127,6 +127,12 @@ func (a *ArgoResource) Filter(
 			return false
 		}
 		log.Debug().Str(a.Kind.ShortName(), a.GetLongName()).Msgf("%s is selected because: %s", a.Kind.ShortName(), reason)
+		// If selected because a watched file changed (not because the app's own
+		// file changed), mark it so the dedup step keeps it even when the
+		// ApplicationSet YAML is identical between branches.
+		if strings.Contains(reason, "watch-pattern") || strings.Contains(reason, "manifest-generate-paths") {
+			a.SelectedByWatchPattern = true
+		}
 	}
 
 	return true

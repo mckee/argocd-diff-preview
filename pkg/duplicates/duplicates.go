@@ -14,6 +14,13 @@ func RemoveIdenticalCopiesBetweenBranches(baseApps, targetApps *argoapplication.
 	for _, baseApp := range baseApps.SelectedApps {
 		for _, targetApp := range targetApps.SelectedApps {
 			if baseApp.Id == targetApp.Id && yamlEqual(baseApp.Yaml, targetApp.Yaml) {
+				// If either copy was selected via watch-pattern, keep it —
+				// the rendered manifests may differ even though the
+				// ApplicationSet YAML is identical (e.g. a values file changed).
+				if baseApp.SelectedByWatchPattern || targetApp.SelectedByWatchPattern {
+					log.Debug().Str(baseApp.Kind.ShortName(), baseApp.Name).Msg("Keeping identical application because it was selected by watch-pattern")
+					break
+				}
 				log.Debug().Str(baseApp.Kind.ShortName(), baseApp.Name).Msg("Skipping application because it has not changed")
 				duplicateYaml = append(duplicateYaml, baseApp.Yaml)
 				break

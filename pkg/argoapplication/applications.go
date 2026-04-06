@@ -15,12 +15,13 @@ import (
 
 // ArgoResource represents an Argo CD Application or ApplicationSet
 type ArgoResource struct {
-	Yaml     *unstructured.Unstructured
-	Kind     ApplicationKind
-	Id       string // The ID is the name of the k8s resource
-	Name     string // The name is the original name of the Application
-	FileName string
-	Branch   git.BranchType
+	Yaml                   *unstructured.Unstructured
+	Kind                   ApplicationKind
+	Id                     string // The ID is the name of the k8s resource
+	Name                   string // The name is the original name of the Application
+	FileName               string
+	Branch                 git.BranchType
+	SelectedByWatchPattern bool // True if selected because files changed matched a watch-pattern
 }
 
 // NewArgoResource creates a new ArgoResource
