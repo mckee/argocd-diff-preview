@@ -91,32 +91,40 @@ func RenderApplicationsFromBothBranches(
 		return nil, nil, time.Since(startTime), err
 	}
 
+	log.Debug().Msg("🔍 Getting list of namespaced scoped resources...")
 	namespacedScopedResources, err := argocd.K8sClient.GetListOfNamespacedScopedResources()
 	if err != nil {
 		return nil, nil, time.Since(startTime), fmt.Errorf("failed to get list of namespaced scoped resources: %w", err)
 	}
+	log.Debug().Msgf("🔍 Got %d namespaced scoped resources", len(namespacedScopedResources))
 
 	// Collect all unique repository URLs referenced by the Applications so that
 	// FetchRepoCreds can enrich them with credentials from repo-creds templates.
 	appRepoURLs := collectRepoURLs(baseApps, targetApps)
+	log.Debug().Msgf("🔍 Collected %d unique repo URLs", len(appRepoURLs))
 
 	// Fetch all repository credentials from the cluster once, upfront.
 	// The repo server has no access to Kubernetes secrets - credentials must be
 	// provided by the caller in every ManifestRequest. We mirror what the
 	// ArgoCD app controller does in controller/state.go before calling the repo server.
+	log.Debug().Msg("🔍 Fetching repo credentials...")
 	creds, err := FetchRepoCreds(context.Background(), argocd.K8sClient, argocd.Namespace, appRepoURLs)
 	if err != nil {
 		return nil, nil, time.Since(startTime), fmt.Errorf("failed to fetch repository credentials: %w", err)
 	}
+	log.Debug().Msg("🔍 Fetched repo credentials")
 
 	// Create a single repo server client shared across all goroutines.
 	// EnsurePortForward is idempotent and mutex-protected inside the client.
+	log.Debug().Msg("🔍 Creating repo server client...")
 	repoClient := reposerver.NewClient(argocd.K8sClient, argocd.Namespace)
 	defer repoClient.Cleanup()
 
+	log.Debug().Msg("🔍 Setting up port forward to repo server...")
 	if err := repoClient.EnsurePortForward(); err != nil {
 		return nil, nil, time.Since(startTime), fmt.Errorf("failed to set up port forward to repo server: %w", err)
 	}
+	log.Debug().Msg("🔍 Port forward to repo server established")
 
 	allApps := append(baseApps, targetApps...)
 
