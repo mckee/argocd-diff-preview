@@ -224,9 +224,13 @@ func RenderApplicationsFromBothBranchesWithAppOfApps(
 	sem := make(chan struct{}, semSize)
 
 	// work is a buffered channel; workers send newly discovered children back
-	// onto it. We size it generously so senders are never blocked.
-	work := make(chan workItem, 1024)
-	results := make(chan renderResult, 1024)
+	// onto it. The buffer must hold at least all seed apps (base + target) because
+	// seeding happens before the consumer loop starts in the same goroutine.
+	// We add headroom for child apps discovered during app-of-apps expansion.
+	seedSize := len(baseApps) + len(targetApps)
+	workBufSize := seedSize + 1024
+	work := make(chan workItem, workBufSize)
+	results := make(chan renderResult, workBufSize)
 
 	// enqueue increments pending before sending so the counter is always >=
 	// actual in-flight count.
