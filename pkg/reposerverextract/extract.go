@@ -150,8 +150,9 @@ func RenderApplicationsFromBothBranches(
 	// ── Worker pool ──────────────────────────────────────────────────────────
 
 	type result struct {
-		app extract.ExtractedApp
-		err error
+		app     extract.ExtractedApp
+		appName string // set on error so we can exclude from both branches
+		err     error
 	}
 
 	results := make(chan result, len(allApps))
@@ -193,7 +194,7 @@ func RenderApplicationsFromBothBranches(
 			defer func() { <-sem }()
 
 			if remainingTime() <= 0 {
-				results <- result{err: fmt.Errorf("timeout reached before starting to render application: %s", app.GetLongName())}
+				results <- result{appName: app.Name, err: fmt.Errorf("timeout reached before starting to render application: %s", app.GetLongName())}
 				return
 			}
 
@@ -202,7 +203,7 @@ func RenderApplicationsFromBothBranches(
 
 			manifests, err := renderApp(ctx, repoClient, app, branchFolderByType, clusterScopedResources, creds, &repoSelector, kubeVersion, apiVersions, kustomizeBuildOptions, helmChartPuller{})
 			if err != nil {
-				results <- result{err: fmt.Errorf("failed to render app %s: %w", app.GetLongName(), err)}
+				results <- result{appName: app.Name, err: fmt.Errorf("failed to render app %s: %w", app.GetLongName(), err)}
 				return
 			}
 
@@ -216,12 +217,16 @@ func RenderApplicationsFromBothBranches(
 	extractedBaseApps := make([]extract.ExtractedApp, 0, len(baseApps))
 	extractedTargetApps := make([]extract.ExtractedApp, 0, len(targetApps))
 	var renderErrors int
+	failedApps := make(map[string]bool)
 
 	for range len(allApps) {
 		r := <-results
 		if r.err != nil {
 			renderErrors++
 			log.Error().Err(r.err).Msg("❌ Failed to render application via repo server:")
+			if r.appName != "" {
+				failedApps[r.appName] = true
+			}
 			continue
 		}
 		switch r.app.Branch {
@@ -241,6 +246,15 @@ func RenderApplicationsFromBothBranches(
 	if renderErrors > 0 {
 		log.Warn().Msgf("⚠️ %d application(s) failed to render but continuing with %d successful results",
 			renderErrors, renderedApps.Load())
+
+		// Remove apps that failed on one branch from the other branch's
+		// results. Without this, an app that renders on base but fails on
+		// target would appear as "Deleted" in the diff (and vice-versa).
+		if len(failedApps) > 0 {
+			log.Info().Msgf("🔍 Excluding %d app name(s) that failed to render from both branches to avoid spurious diffs", len(failedApps))
+			extractedBaseApps = filterOutFailedApps(extractedBaseApps, failedApps)
+			extractedTargetApps = filterOutFailedApps(extractedTargetApps, failedApps)
+		}
 	}
 	log.Info().Msgf("🎉 Rendered %d applications via repo server in %s",
 		renderedApps.Load(), duration.Round(time.Second))
