@@ -198,14 +198,12 @@ func RenderApplicationsFromBothBranches(
 
 	extractedBaseApps := make([]extract.ExtractedApp, 0, len(baseApps))
 	extractedTargetApps := make([]extract.ExtractedApp, 0, len(targetApps))
-	var firstError error
+	var renderErrors int
 
 	for range len(allApps) {
 		r := <-results
 		if r.err != nil {
-			if firstError == nil {
-				firstError = r.err
-			}
+			renderErrors++
 			log.Error().Err(r.err).Msg("❌ Failed to render application via repo server:")
 			continue
 		}
@@ -215,20 +213,19 @@ func RenderApplicationsFromBothBranches(
 		case git.Target:
 			extractedTargetApps = append(extractedTargetApps, r.app)
 		default:
-			if firstError == nil {
-				firstError = fmt.Errorf("unknown branch type: '%s'", r.app.Branch)
-			}
+			renderErrors++
+			log.Error().Msgf("❌ Unknown branch type: '%s'", r.app.Branch)
 		}
 	}
 
 	close(progressDone)
 
-	if firstError != nil {
-		return nil, nil, time.Since(startTime), firstError
-	}
-
 	duration := time.Since(startTime)
-	log.Info().Msgf("🎉 Rendered all %d applications via repo server in %s",
+	if renderErrors > 0 {
+		log.Warn().Msgf("⚠️ %d application(s) failed to render but continuing with %d successful results",
+			renderErrors, renderedApps.Load())
+	}
+	log.Info().Msgf("🎉 Rendered %d applications via repo server in %s",
 		renderedApps.Load(), duration.Round(time.Second))
 	log.Info().Msgf("🤖 Got %d resources from %s-branch and %d from %s-branch via repo server",
 		len(extractedBaseApps), git.Base, len(extractedTargetApps), git.Target)
