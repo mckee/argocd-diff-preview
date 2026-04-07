@@ -225,7 +225,7 @@ func RenderApplicationsFromBothBranchesWithAppOfApps(
 		extractedTargetApps []extract.ExtractedApp
 		renderedApps        atomic.Int32
 		pending             atomic.Int32
-		firstError          error
+		renderErrors        atomic.Int32
 		visitedMu           sync.Mutex
 	)
 
@@ -290,9 +290,7 @@ func RenderApplicationsFromBothBranchesWithAppOfApps(
 		defer close(collectorDone)
 		for r := range results {
 			if r.err != nil {
-				if firstError == nil {
-					firstError = r.err
-				}
+				renderErrors.Add(1)
 				log.Error().Err(r.err).Msg("❌ Failed to render application via repo server:")
 			} else {
 				switch r.extracted.Branch {
@@ -301,9 +299,8 @@ func RenderApplicationsFromBothBranchesWithAppOfApps(
 				case git.Target:
 					extractedTargetApps = append(extractedTargetApps, r.extracted)
 				default:
-					if firstError == nil {
-						firstError = fmt.Errorf("unknown branch type: '%s'", r.extracted.Branch)
-					}
+					renderErrors.Add(1)
+					log.Error().Msgf("❌ Unknown branch type: '%s'", r.extracted.Branch)
 				}
 
 				// Enqueue children that haven't been seen yet and pass the selection filter.
@@ -394,12 +391,12 @@ func RenderApplicationsFromBothBranchesWithAppOfApps(
 
 	close(progressDone)
 
-	if firstError != nil {
-		return nil, nil, time.Since(startTime), firstError
-	}
-
 	duration := time.Since(startTime)
-	log.Info().Msgf("🎉 Rendered all %d applications via repo server in %s",
+	if errCount := renderErrors.Load(); errCount > 0 {
+		log.Warn().Msgf("⚠️ %d application(s) failed to render but continuing with %d successful results",
+			errCount, renderedApps.Load())
+	}
+	log.Info().Msgf("🎉 Rendered %d applications via repo server in %s",
 		renderedApps.Load(), duration.Round(time.Second))
 	log.Info().Msgf("🤖 Got %d resources from %s-branch and %d from %s-branch via repo server",
 		len(extractedBaseApps), git.Base, len(extractedTargetApps), git.Target)
