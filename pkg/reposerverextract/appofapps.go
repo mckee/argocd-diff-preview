@@ -58,6 +58,10 @@ type renderResult struct {
 	// whether to enqueue its children.
 	depth int
 
+	// appName is set on error results so the collector can track which app
+	// names failed, allowing them to be excluded from both branches' output.
+	appName string
+
 	err error
 }
 
@@ -213,7 +217,15 @@ func RenderApplicationsFromBothBranchesWithAppOfApps(
 		pending             atomic.Int32
 		renderErrors        atomic.Int32
 		visitedMu           sync.Mutex
+		failedAppsMu        sync.Mutex
 	)
+
+	// failedApps tracks app Names that failed to render on either branch.
+	// After all rendering completes, apps with these names are removed from
+	// BOTH sides' results so they don't appear as spurious adds/deletes in
+	// the diff (an app that fails on target but succeeds on base would
+	// otherwise show as "Deleted").
+	failedApps := make(map[string]bool)
 
 	visited := make(map[string]bool)
 
@@ -278,6 +290,11 @@ func RenderApplicationsFromBothBranchesWithAppOfApps(
 			if r.err != nil {
 				renderErrors.Add(1)
 				log.Error().Err(r.err).Msg("❌ Failed to render application via repo server:")
+				if r.appName != "" {
+					failedAppsMu.Lock()
+					failedApps[r.appName] = true
+					failedAppsMu.Unlock()
+				}
 			} else {
 				switch r.extracted.Branch {
 				case git.Base:
@@ -347,7 +364,7 @@ func RenderApplicationsFromBothBranchesWithAppOfApps(
 			defer func() { <-sem }()
 
 			if remainingTime() <= 0 {
-				results <- renderResult{err: fmt.Errorf("timeout reached before starting to render application: %s", item.app.GetLongName())}
+				results <- renderResult{appName: item.app.Name, err: fmt.Errorf("timeout reached before starting to render application: %s", item.app.GetLongName())}
 				return
 			}
 
@@ -356,7 +373,7 @@ func RenderApplicationsFromBothBranchesWithAppOfApps(
 
 			manifests, childApps, err := renderAppWithChildDiscovery(ctx, repoClient, argocd, item.app, branchFolderByType, branchByType, namespacedScopedResources, creds, prRepo, argocd.Namespace, tempFolder, item.depth)
 			if err != nil {
-				results <- renderResult{err: fmt.Errorf("failed to render app %s: %w", item.app.GetLongName(), err)}
+				results <- renderResult{appName: item.app.Name, err: fmt.Errorf("failed to render app %s: %w", item.app.GetLongName(), err)}
 				return
 			}
 
@@ -381,6 +398,15 @@ func RenderApplicationsFromBothBranchesWithAppOfApps(
 	if errCount := renderErrors.Load(); errCount > 0 {
 		log.Warn().Msgf("⚠️ %d application(s) failed to render but continuing with %d successful results",
 			errCount, renderedApps.Load())
+
+		// Remove apps that failed on one branch from the other branch's
+		// results. Without this, an app that renders on base but fails on
+		// target would appear as "Deleted" in the diff (and vice-versa).
+		if len(failedApps) > 0 {
+			log.Info().Msgf("🔍 Excluding %d app name(s) that failed to render from both branches to avoid spurious diffs", len(failedApps))
+			extractedBaseApps = filterOutFailedApps(extractedBaseApps, failedApps)
+			extractedTargetApps = filterOutFailedApps(extractedTargetApps, failedApps)
+		}
 	}
 	log.Info().Msgf("🎉 Rendered %d applications via repo server in %s",
 		renderedApps.Load(), duration.Round(time.Second))
@@ -388,6 +414,20 @@ func RenderApplicationsFromBothBranchesWithAppOfApps(
 		len(extractedBaseApps), git.Base, len(extractedTargetApps), git.Target)
 
 	return extractedBaseApps, extractedTargetApps, time.Since(startTime), nil
+}
+
+// filterOutFailedApps removes ExtractedApps whose Name is in the failedApps set.
+func filterOutFailedApps(apps []extract.ExtractedApp, failedApps map[string]bool) []extract.ExtractedApp {
+	filtered := make([]extract.ExtractedApp, 0, len(apps))
+	for _, app := range apps {
+		if failedApps[app.Name] {
+			log.Debug().Str("App", app.Name).Str("Branch", string(app.Branch)).
+				Msg("Excluding app from diff output — failed to render on other branch")
+			continue
+		}
+		filtered = append(filtered, app)
+	}
+	return filtered
 }
 
 // renderAppWithChildDiscovery renders a single application and returns:
