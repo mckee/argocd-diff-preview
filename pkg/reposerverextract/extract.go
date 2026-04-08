@@ -365,6 +365,8 @@ func renderApp(
 	// Apply ignoreDifferences rules using the shared implementation in pkg/extract.
 	extract.ApplyIgnoreDifferences(manifests, app)
 
+	extract.RedactSecrets(manifests)
+
 	if err := removeArgoCDTrackingID(manifests); err != nil {
 		return nil, fmt.Errorf("failed to remove Argo CD tracking ID: %w", err)
 	}

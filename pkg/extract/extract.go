@@ -389,6 +389,8 @@ func getManifestsFromApp(argocd *argocdPkg.ArgoCDInstallation, app argoapplicati
 		ApplyIgnoreDifferencesToManifests(manifests, rules)
 	}
 
+	RedactSecrets(manifests)
+
 	err = removeArgoCDTrackingID(manifests)
 	if err != nil {
 		return nil, fmt.Errorf("failed to remove Argo CD tracking ID: %w", err)
@@ -534,4 +536,26 @@ func containsAny(s string, substrs []string) bool {
 		}
 	}
 	return false
+}
+
+// RedactSecrets replaces all values in Secret data and stringData fields with
+// "REDACTED" so that sensitive material never appears in diff output. Both
+// sides of the diff are redacted identically, so Secrets that differ only in
+// generated values (passwords, certs) produce no diff at all.
+func RedactSecrets(manifests []unstructured.Unstructured) {
+	for i := range manifests {
+		if manifests[i].GetKind() != "Secret" {
+			continue
+		}
+		for _, field := range []string{"data", "stringData"} {
+			m, found, _ := unstructured.NestedMap(manifests[i].Object, field)
+			if !found {
+				continue
+			}
+			for k := range m {
+				m[k] = "REDACTED"
+			}
+			_ = unstructured.SetNestedField(manifests[i].Object, m, field)
+		}
+	}
 }
