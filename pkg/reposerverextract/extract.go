@@ -19,6 +19,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -72,7 +73,7 @@ func RenderApplicationsFromBothBranches(
 	baseApps []argoapplication.ArgoResource,
 	targetApps []argoapplication.ArgoResource,
 	prRepo string,
-) ([]extract.ExtractedApp, []extract.ExtractedApp, time.Duration, error) {
+) ([]extract.ExtractedApp, []extract.ExtractedApp, time.Duration, []string, error) {
 	startTime := time.Now()
 
 	branchFolderByType := map[git.BranchType]string{
@@ -84,17 +85,17 @@ func RenderApplicationsFromBothBranches(
 		len(baseApps), len(targetApps))
 
 	if err := extract.VerifyNoApplicationSets(baseApps); err != nil {
-		return nil, nil, time.Since(startTime), err
+		return nil, nil, time.Since(startTime), nil, err
 	}
 
 	if err := extract.VerifyNoApplicationSets(targetApps); err != nil {
-		return nil, nil, time.Since(startTime), err
+		return nil, nil, time.Since(startTime), nil, err
 	}
 
 	log.Debug().Msg("🔍 Getting list of namespaced scoped resources...")
 	namespacedScopedResources, err := argocd.K8sClient.GetListOfNamespacedScopedResources()
 	if err != nil {
-		return nil, nil, time.Since(startTime), fmt.Errorf("failed to get list of namespaced scoped resources: %w", err)
+		return nil, nil, time.Since(startTime), nil, fmt.Errorf("failed to get list of namespaced scoped resources: %w", err)
 	}
 	log.Debug().Msgf("🔍 Got %d namespaced scoped resources", len(namespacedScopedResources))
 
@@ -110,7 +111,7 @@ func RenderApplicationsFromBothBranches(
 	log.Debug().Msg("🔍 Fetching repo credentials...")
 	creds, err := FetchRepoCreds(context.Background(), argocd.K8sClient, argocd.Namespace, appRepoURLs)
 	if err != nil {
-		return nil, nil, time.Since(startTime), fmt.Errorf("failed to fetch repository credentials: %w", err)
+		return nil, nil, time.Since(startTime), nil, fmt.Errorf("failed to fetch repository credentials: %w", err)
 	}
 	log.Debug().Msg("🔍 Fetched repo credentials")
 
@@ -122,7 +123,7 @@ func RenderApplicationsFromBothBranches(
 
 	log.Debug().Msg("🔍 Setting up port forward to repo server...")
 	if err := repoClient.EnsurePortForward(); err != nil {
-		return nil, nil, time.Since(startTime), fmt.Errorf("failed to set up port forward to repo server: %w", err)
+		return nil, nil, time.Since(startTime), nil, fmt.Errorf("failed to set up port forward to repo server: %w", err)
 	}
 	log.Debug().Msg("🔍 Port forward to repo server established")
 
@@ -244,7 +245,14 @@ func RenderApplicationsFromBothBranches(
 	log.Info().Msgf("🤖 Got %d resources from %s-branch and %d from %s-branch via repo server",
 		len(extractedBaseApps), git.Base, len(extractedTargetApps), git.Target)
 
-	return extractedBaseApps, extractedTargetApps, time.Since(startTime), nil
+	// Build sorted list of failed app names for the report.
+	failedAppNames := make([]string, 0, len(failedApps))
+	for name := range failedApps {
+		failedAppNames = append(failedAppNames, name)
+	}
+	sort.Strings(failedAppNames)
+
+	return extractedBaseApps, extractedTargetApps, time.Since(startTime), failedAppNames, nil
 }
 
 // renderApp packages a single application's source directory and streams it to

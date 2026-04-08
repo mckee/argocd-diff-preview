@@ -30,6 +30,7 @@ func GeneratePreview(
 	selectionInfo SelectionInfo,
 	argocdUIURL string,
 	ignoreResourceRules []resource_filter.IgnoreResourceRule,
+	failedAppNames []string,
 ) (time.Duration, error) {
 	startTime := time.Now()
 	maxDiffMessageCharCount := maxCharCount
@@ -64,7 +65,7 @@ func GeneratePreview(
 	}
 
 	// Build summary
-	summary := buildSummary(appDiffs)
+	summary := buildSummary(appDiffs, failedAppNames)
 
 	// Convert to markdown/HTML sections
 	markdownSections, htmlSections := buildMatchingSections(appDiffs, argocdUIURL)
@@ -109,8 +110,8 @@ func GeneratePreview(
 }
 
 // buildSummary builds a summary string from AppDiffs
-func buildSummary(diffs []matching.AppDiff) string {
-	if len(diffs) == 0 {
+func buildSummary(diffs []matching.AppDiff, failedAppNames []string) string {
+	if len(diffs) == 0 && len(failedAppNames) == 0 {
 		return "No changes found"
 	}
 
@@ -163,6 +164,16 @@ func buildSummary(diffs []matching.AppDiff) string {
 			if d.Action == matching.ActionModified {
 				fmt.Fprintf(&summaryBuilder, "± %s%s\n", d.PrettyName(), d.ChangeStats())
 			}
+		}
+	}
+
+	if len(failedAppNames) > 0 {
+		if summaryBuilder.Len() > 0 {
+			fmt.Fprintln(&summaryBuilder)
+		}
+		fmt.Fprintf(&summaryBuilder, "Failed to render (%d):\n", len(failedAppNames))
+		for _, name := range failedAppNames {
+			fmt.Fprintf(&summaryBuilder, "⚠ %s\n", name)
 		}
 	}
 

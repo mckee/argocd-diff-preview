@@ -430,6 +430,7 @@ var defaultIgnorePatterns = []string{
 	"ca.crt: ",
 	"tls.crt: ",
 	"tls.key: ",
+	"release.timestamp: ",
 }
 
 // formatDiffWithIgnore formats diffs with support for ignore patterns

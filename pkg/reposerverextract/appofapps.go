@@ -13,6 +13,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -140,7 +141,7 @@ func RenderApplicationsFromBothBranchesWithAppOfApps(
 	prRepo string,
 	appSelectionOptions argoapplication.ApplicationSelectionOptions,
 	tempFolder string,
-) ([]extract.ExtractedApp, []extract.ExtractedApp, time.Duration, error) {
+) ([]extract.ExtractedApp, []extract.ExtractedApp, time.Duration, []string, error) {
 	startTime := time.Now()
 
 	branchFolderByType := map[git.BranchType]string{
@@ -157,17 +158,17 @@ func RenderApplicationsFromBothBranchesWithAppOfApps(
 		len(baseApps), len(targetApps))
 
 	if err := extract.VerifyNoApplicationSets(baseApps); err != nil {
-		return nil, nil, time.Since(startTime), err
+		return nil, nil, time.Since(startTime), nil, err
 	}
 
 	if err := extract.VerifyNoApplicationSets(targetApps); err != nil {
-		return nil, nil, time.Since(startTime), err
+		return nil, nil, time.Since(startTime), nil, err
 	}
 
 	log.Debug().Msg("🔍 [appofapps] Getting list of namespaced scoped resources...")
 	namespacedScopedResources, err := argocd.K8sClient.GetListOfNamespacedScopedResources()
 	if err != nil {
-		return nil, nil, time.Since(startTime), fmt.Errorf("failed to get list of namespaced scoped resources: %w", err)
+		return nil, nil, time.Since(startTime), nil, fmt.Errorf("failed to get list of namespaced scoped resources: %w", err)
 	}
 	log.Debug().Msgf("🔍 [appofapps] Got %d namespaced scoped resources", len(namespacedScopedResources))
 
@@ -183,7 +184,7 @@ func RenderApplicationsFromBothBranchesWithAppOfApps(
 	log.Debug().Msg("🔍 [appofapps] Fetching repo credentials...")
 	creds, err := FetchRepoCreds(context.Background(), argocd.K8sClient, argocd.Namespace, appRepoURLs)
 	if err != nil {
-		return nil, nil, time.Since(startTime), fmt.Errorf("failed to fetch repository credentials: %w", err)
+		return nil, nil, time.Since(startTime), nil, fmt.Errorf("failed to fetch repository credentials: %w", err)
 	}
 	log.Debug().Msg("🔍 [appofapps] Fetched repo credentials")
 
@@ -194,7 +195,7 @@ func RenderApplicationsFromBothBranchesWithAppOfApps(
 	defer repoClient.Cleanup()
 
 	if err := repoClient.EnsurePortForward(); err != nil {
-		return nil, nil, time.Since(startTime), fmt.Errorf("failed to set up port forward to repo server: %w", err)
+		return nil, nil, time.Since(startTime), nil, fmt.Errorf("failed to set up port forward to repo server: %w", err)
 	}
 	log.Debug().Msg("🔍 [appofapps] Port forward to repo server established")
 
@@ -413,7 +414,14 @@ func RenderApplicationsFromBothBranchesWithAppOfApps(
 	log.Info().Msgf("🤖 Got %d resources from %s-branch and %d from %s-branch via repo server",
 		len(extractedBaseApps), git.Base, len(extractedTargetApps), git.Target)
 
-	return extractedBaseApps, extractedTargetApps, time.Since(startTime), nil
+	// Build sorted list of failed app names for the report.
+	failedAppNames := make([]string, 0, len(failedApps))
+	for name := range failedApps {
+		failedAppNames = append(failedAppNames, name)
+	}
+	sort.Strings(failedAppNames)
+
+	return extractedBaseApps, extractedTargetApps, time.Since(startTime), failedAppNames, nil
 }
 
 // filterOutFailedApps removes ExtractedApps whose Name is in the failedApps set.
