@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -76,7 +77,7 @@ func RenderApplicationsFromBothBranches(
 	baseApps []argoapplication.ArgoResource,
 	targetApps []argoapplication.ArgoResource,
 	repoSelector repository.Selector,
-) ([]extract.ExtractedApp, []extract.ExtractedApp, time.Duration, error) {
+) ([]extract.ExtractedApp, []extract.ExtractedApp, time.Duration, []string, error) {
 	startTime := time.Now()
 
 	branchFolderByType := map[git.BranchType]string{
@@ -88,21 +89,21 @@ func RenderApplicationsFromBothBranches(
 		len(baseApps), len(targetApps))
 
 	if err := extract.VerifyNoApplicationSets(baseApps); err != nil {
-		return nil, nil, time.Since(startTime), err
+		return nil, nil, time.Since(startTime), nil, err
 	}
 
 	if err := extract.VerifyNoApplicationSets(targetApps); err != nil {
-		return nil, nil, time.Since(startTime), err
+		return nil, nil, time.Since(startTime), nil, err
 	}
 
 	clusterScopedResources, apiVersions, err := argocd.K8sClient.GetClusterScopedResourcesAndAPIVersions()
 	if err != nil {
-		return nil, nil, time.Since(startTime), fmt.Errorf("failed to initialize render context: %w", err)
+		return nil, nil, time.Since(startTime), nil, fmt.Errorf("failed to initialize render context: %w", err)
 	}
 
 	kubeVersion, err := argocd.K8sClient.GetServerVersion()
 	if err != nil {
-		return nil, nil, time.Since(startTime), fmt.Errorf("failed to get server version: %w", err)
+		return nil, nil, time.Since(startTime), nil, fmt.Errorf("failed to get server version: %w", err)
 	}
 
 	// Mirror Argo CD's API server: pass the global kustomize build options from argocd-cm on every request;
@@ -126,7 +127,7 @@ func RenderApplicationsFromBothBranches(
 	// ArgoCD app controller does in controller/state.go before calling the repo server.
 	creds, err := FetchRepoCredsWithTimeout(context.Background(), repoCredsFetchTimeout, argocd.K8sClient, argocd.Namespace, appRepoURLs)
 	if err != nil {
-		return nil, nil, time.Since(startTime), fmt.Errorf("failed to fetch repository credentials: %w", err)
+		return nil, nil, time.Since(startTime), nil, fmt.Errorf("failed to fetch repository credentials: %w", err)
 	}
 
 	// Create a single repo server client shared across all goroutines.
@@ -138,7 +139,7 @@ func RenderApplicationsFromBothBranches(
 	} else {
 		repoClient = reposerver.NewClient(argocd.K8sClient, argocd.Namespace)
 		if err := repoClient.EnsurePortForward(); err != nil {
-			return nil, nil, time.Since(startTime), fmt.Errorf("failed to set up port forward to repo server: %w", err)
+			return nil, nil, time.Since(startTime), nil, fmt.Errorf("failed to set up port forward to repo server: %w", err)
 		}
 	}
 	defer repoClient.Cleanup()
@@ -261,7 +262,14 @@ func RenderApplicationsFromBothBranches(
 	log.Info().Msgf("🤖 Got %d resources from %s-branch and %d from %s-branch via repo server",
 		len(extractedBaseApps), git.Base, len(extractedTargetApps), git.Target)
 
-	return extractedBaseApps, extractedTargetApps, time.Since(startTime), nil
+	// Build sorted list of failed app names for the report.
+	failedAppNames := make([]string, 0, len(failedApps))
+	for name := range failedApps {
+		failedAppNames = append(failedAppNames, name)
+	}
+	sort.Strings(failedAppNames)
+
+	return extractedBaseApps, extractedTargetApps, time.Since(startTime), failedAppNames, nil
 }
 
 // renderApp packages a single application's source directory and streams it to

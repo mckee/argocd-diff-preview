@@ -317,13 +317,14 @@ func run(cfg *Config) error {
 
 	var baseManifests, targetManifests []extract.ExtractedApp
 	var extractDuration time.Duration
+	var failedAppNames []string
 
 	if cfg.RenderMethod == RenderMethodRepoServerAPI {
 
 		// Extract resources by streaming source files directly to the Argo CD repo server via gRPC.
 		// This bypasses the cluster reconciliation loop used by extract.RenderApplicationsFromBothBranches.
 		if cfg.TraverseAppOfApps {
-			baseManifests, targetManifests, extractDuration, err = reposerverextract.RenderApplicationsFromBothBranchesWithAppOfApps(
+			baseManifests, targetManifests, extractDuration, failedAppNames, err = reposerverextract.RenderApplicationsFromBothBranchesWithAppOfApps(
 				argocd,
 				baseBranch,
 				targetBranch,
@@ -337,7 +338,7 @@ func run(cfg *Config) error {
 				redirectRevisions,
 			)
 		} else {
-			baseManifests, targetManifests, extractDuration, err = reposerverextract.RenderApplicationsFromBothBranches(
+			baseManifests, targetManifests, extractDuration, failedAppNames, err = reposerverextract.RenderApplicationsFromBothBranches(
 				argocd,
 				baseBranch,
 				targetBranch,
@@ -408,6 +409,7 @@ func run(cfg *Config) error {
 		selectionInfo,
 		cfg.ArgocdUIURL,
 		cfg.IgnoreResourceRules,
+		failedAppNames,
 	)
 	if err != nil {
 		log.Error().Msg("❌ Failed to generate diff")
