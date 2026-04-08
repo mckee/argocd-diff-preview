@@ -244,6 +244,15 @@ func convertAppSetsToApps(
 			defer func() { <-sem }() // release semaphore slot
 
 			apps, err := generateAppsFromAppSet(argocd, appSet, branch, tempFolder)
+			// Propagate SelectedByWatchPattern from parent ApplicationSet to
+			// generated child Applications so the selection filter doesn't
+			// discard them. Without this, cross-repo diffs fail because the
+			// expanded apps have no watch-pattern annotations of their own.
+			if appSet.SelectedByWatchPattern {
+				for j := range apps {
+					apps[j].SelectedByWatchPattern = true
+				}
+			}
 			results <- appSetGenerateResult{index: i, apps: apps, err: err}
 		}(i, appSet)
 	}
