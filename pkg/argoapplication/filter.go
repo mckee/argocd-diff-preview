@@ -121,17 +121,25 @@ func (a *ArgoResource) Filter(
 
 	// Then check files changed
 	if len(appSelectionOptions.FilesChanged) > 0 {
-		selected, reason := a.filterByFilesChanged(appSelectionOptions.FilesChanged, appSelectionOptions.IgnoreInvalidWatchPattern, appSelectionOptions.WatchIfNoWatchPatternFound)
-		if !selected {
-			log.Debug().Str(a.Kind.ShortName(), a.GetLongName()).Msgf("%s is not selected because: %s", a.Kind.ShortName(), reason)
-			return false
-		}
-		log.Debug().Str(a.Kind.ShortName(), a.GetLongName()).Msgf("%s is selected because: %s", a.Kind.ShortName(), reason)
-		// If selected because a watched file changed (not because the app's own
-		// file changed), mark it so the dedup step keeps it even when the
-		// ApplicationSet YAML is identical between branches.
-		if strings.Contains(reason, "watch-pattern") || strings.Contains(reason, "manifest-generate-paths") {
-			a.SelectedByWatchPattern = true
+		// If already selected by watch-pattern (inherited from parent
+		// ApplicationSet), skip re-checking. The parent was selected because
+		// its watch-pattern matched the changed files; the expanded child
+		// apps have different annotations that may not match.
+		if a.SelectedByWatchPattern {
+			log.Debug().Str(a.Kind.ShortName(), a.GetLongName()).Msgf("%s is selected because: inherited watch-pattern from parent ApplicationSet", a.Kind.ShortName())
+		} else {
+			selected, reason := a.filterByFilesChanged(appSelectionOptions.FilesChanged, appSelectionOptions.IgnoreInvalidWatchPattern, appSelectionOptions.WatchIfNoWatchPatternFound)
+			if !selected {
+				log.Debug().Str(a.Kind.ShortName(), a.GetLongName()).Msgf("%s is not selected because: %s", a.Kind.ShortName(), reason)
+				return false
+			}
+			log.Debug().Str(a.Kind.ShortName(), a.GetLongName()).Msgf("%s is selected because: %s", a.Kind.ShortName(), reason)
+			// If selected because a watched file changed (not because the app's own
+			// file changed), mark it so the dedup step keeps it even when the
+			// ApplicationSet YAML is identical between branches.
+			if strings.Contains(reason, "watch-pattern") || strings.Contains(reason, "manifest-generate-paths") {
+				a.SelectedByWatchPattern = true
+			}
 		}
 	}
 
