@@ -172,12 +172,17 @@ func processAppSets(
 		}
 	}
 
-	// In cross-repo mode (localRepo != repo), filter expanded apps to only
-	// keep those whose repoURL matches --repo. This prevents rendering
-	// hundreds of unrelated apps that would fail or produce noise.
+	// In cross-repo mode (localRepo != repo), filter expanded Applications
+	// to only keep those whose repoURL matches --repo. ApplicationSets are
+	// kept unconditionally — they need to reach the traversal path where
+	// ArgoCD expands them and the child filter applies.
 	if localRepo != repo && repo != "" {
 		var filtered []ArgoResource
 		for _, app := range patchedApps {
+			if app.Kind == ApplicationSet {
+				filtered = append(filtered, app)
+				continue
+			}
 			sourceURL, _, _ := unstructured.NestedString(app.Yaml.Object, "spec", "source", "repoURL")
 			if sourceURL != "" && !containsIgnoreCase(sourceURL, repo) {
 				log.Debug().Str("branch", branch.Name).Str(app.Kind.ShortName(), app.GetLongName()).
@@ -187,7 +192,7 @@ func processAppSets(
 			}
 			filtered = append(filtered, app)
 		}
-		log.Info().Str("branch", branch.Name).Msgf("🤖 Cross-repo filter: kept %d of %d expanded Applications", len(filtered), len(patchedApps))
+		log.Info().Str("branch", branch.Name).Msgf("🤖 Cross-repo filter: kept %d of %d expanded resources", len(filtered), len(patchedApps))
 		patchedApps = filtered
 	}
 
