@@ -333,6 +333,7 @@ func run(cfg *Config) error {
 				baseApps.SelectedApps,
 				targetApps.SelectedApps,
 				cfg.LocalRepoSelector,
+				cfg.RepoSelector,
 				appSelectionOptions,
 				tempFolder,
 				redirectRevisions,
