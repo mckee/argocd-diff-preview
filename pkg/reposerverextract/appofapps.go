@@ -176,6 +176,20 @@ func RenderApplicationsFromBothBranchesWithAppOfApps(
 	// Collect all unique repository URLs referenced by the Applications so that
 	// FetchRepoCreds can enrich them with credentials from repo-creds templates.
 	appRepoURLs := collectRepoURLs(baseApps, targetApps)
+	// In cross-repo mode, child apps reference the --repo repository which
+	// isn't in the seed apps. Derive a full URL from existing repo URLs and
+	// add it so FetchRepoCreds can look up credentials via repo-creds templates.
+	if patchRepo != "" && patchRepo != localRepo && len(appRepoURLs) > 0 {
+		// Extract the host from an existing URL (e.g. "https://gitlab.com/org/repo.git" → "https://gitlab.com/")
+		if idx := strings.Index(appRepoURLs[0], "://"); idx >= 0 {
+			rest := appRepoURLs[0][idx+3:]
+			if slashIdx := strings.Index(rest, "/"); slashIdx >= 0 {
+				host := appRepoURLs[0][:idx+3+slashIdx]
+				syntheticURL := host + "/" + patchRepo + ".git"
+				appRepoURLs = append(appRepoURLs, syntheticURL)
+			}
+		}
+	}
 	log.Debug().Msgf("🔍 [appofapps] Collected %d unique repo URLs: %v", len(appRepoURLs), appRepoURLs)
 
 	// Fetch all repository credentials from the cluster once, upfront.
