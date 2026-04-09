@@ -96,6 +96,7 @@ type RawOptions struct {
 	BaseBranch                 string `mapstructure:"base-branch"`
 	TargetBranch               string `mapstructure:"target-branch"`
 	Repo                       string `mapstructure:"repo"`
+	LocalRepo                  string `mapstructure:"local-repo"`
 	OutputFolder               string `mapstructure:"output-folder"`
 	SecretsFolder              string `mapstructure:"secrets-folder"`
 	CreateCluster              bool   `mapstructure:"create-cluster"`
@@ -145,6 +146,7 @@ type Config struct {
 	BaseBranch                 string
 	TargetBranch               string
 	Repo                       string
+	LocalRepo                  string
 	OutputFolder               string
 	SecretsFolder              string
 	CreateCluster              bool
@@ -299,6 +301,7 @@ func Parse() *Config {
 	rootCmd.Flags().StringP("base-branch", "b", DefaultBaseBranch, "Base branch name")
 	rootCmd.Flags().StringP("target-branch", "t", "", "Target branch name (required)")
 	rootCmd.Flags().String("repo", "", "Git Repository. Format: OWNER/REPO (required)")
+	rootCmd.Flags().String("local-repo", "", "Repository checked out in base-branch/target-branch dirs. Controls local file streaming vs remote RPC. Defaults to --repo if not set.")
 
 	// Folders
 	rootCmd.Flags().StringP("output-folder", "o", DefaultOutputFolder, "Output folder where the diff will be saved")
@@ -416,6 +419,12 @@ func (o *RawOptions) ToConfig() (*Config, error) {
 		OutputAppManifests:         o.OutputAppManifests,
 		OutputBranchManifests:      o.OutputBranchManifests,
 		TraverseAppOfApps:          o.TraverseAppOfApps,
+		LocalRepo:                  o.LocalRepo,
+	}
+
+	// Default LocalRepo to Repo when not explicitly set
+	if cfg.LocalRepo == "" {
+		cfg.LocalRepo = cfg.Repo
 	}
 
 	var err error
@@ -649,6 +658,9 @@ func (o *Config) LogConfig() {
 		log.Info().Msgf("✨ - argocd-config-dir: %s", o.ArgocdConfigPath)
 	}
 	log.Info().Msgf("✨ - repo: %s", o.Repo)
+	if o.LocalRepo != "" && o.LocalRepo != o.Repo {
+		log.Info().Msgf("✨ - local-repo: %s", o.LocalRepo)
+	}
 	log.Info().Msgf("✨ - timeout: %d seconds", o.Timeout)
 	if o.LogFormat != DefaultLogFormat {
 		log.Info().Msgf("✨ - log-format: %s", o.LogFormat)
