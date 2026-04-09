@@ -193,6 +193,20 @@ func RenderApplicationsFromBothBranchesWithAppOfApps(
 	// Collect all unique repository URLs referenced by the Applications so that
 	// FetchRepoCreds can enrich them with credentials from repo-creds templates.
 	appRepoURLs := collectRepoURLs(baseApps, targetApps)
+	// In cross-repo mode, child apps reference the --repo repository which
+	// isn't in the seed apps. Derive a full URL from existing repo URLs and
+	// add it so FetchRepoCreds can look up credentials via repo-creds templates.
+	if patchSelector.Repo != "" && patchSelector.Repo != repoSelector.Repo && len(appRepoURLs) > 0 {
+		// Extract the host from an existing URL (e.g. "https://gitlab.com/org/repo.git" → "https://gitlab.com/")
+		if idx := strings.Index(appRepoURLs[0], "://"); idx >= 0 {
+			rest := appRepoURLs[0][idx+3:]
+			if slashIdx := strings.Index(rest, "/"); slashIdx >= 0 {
+				host := appRepoURLs[0][:idx+3+slashIdx]
+				syntheticURL := host + "/" + patchSelector.Repo + ".git"
+				appRepoURLs = append(appRepoURLs, syntheticURL)
+			}
+		}
+	}
 
 	// Fetch all repository credentials from the cluster once, upfront.
 	// The repo server has no access to Kubernetes secrets - credentials must be
@@ -549,12 +563,12 @@ func renderAppWithChildDiscovery(
 					Msg("⚠️ Could not patch child Application; skipping child rendering")
 				continue
 			}
-			// In cross-repo mode (localRepo != patchRepo), only render child
-			// apps whose source matches localRepo or patchRepo. Other apps
+			// In cross-repo mode (--local-repo differs from --repo), only render child
+			// apps whose source matches either repo. Other apps
 			// (from unrelated repos) would fail to render and produce noise.
-			if localRepo != patchRepo {
+			if repoSelector.String() != patchSelector.String() {
 				sourceURL, _, _ := unstructured.NestedString(child.Yaml.Object, "spec", "source", "repoURL")
-				if sourceURL != "" && !repoURLContains(sourceURL, patchRepo) && !repoURLContains(sourceURL, localRepo) {
+				if sourceURL != "" && !patchSelector.Matches(sourceURL) && !repoSelector.Matches(sourceURL) {
 					log.Debug().
 						Str("parentApp", app.Name).
 						Str("childApp", child.GetLongName()).
@@ -625,9 +639,9 @@ func renderAppWithChildDiscovery(
 					continue
 				}
 				// Cross-repo filter: only render apps matching --repo or --local-repo
-				if localRepo != patchRepo {
+				if repoSelector.String() != patchSelector.String() {
 					sourceURL, _, _ := unstructured.NestedString(child.Yaml.Object, "spec", "source", "repoURL")
-					if sourceURL != "" && !repoURLContains(sourceURL, patchRepo) && !repoURLContains(sourceURL, localRepo) {
+					if sourceURL != "" && !patchSelector.Matches(sourceURL) && !repoSelector.Matches(sourceURL) {
 						log.Debug().
 							Str("appSet", appSetName).
 							Str("childApp", child.GetLongName()).
