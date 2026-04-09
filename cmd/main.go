@@ -247,7 +247,6 @@ func run(cfg *Config) error {
 		baseBranch,
 		targetBranch,
 		cfg.Repo,
-		cfg.LocalRepo,
 		tempFolder,
 		redirectRevisions,
 		cfg.Debug,

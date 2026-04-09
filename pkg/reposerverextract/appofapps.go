@@ -520,20 +520,15 @@ func renderAppWithChildDiscovery(
 					Msg("⚠️ Could not patch child Application; skipping child rendering")
 				continue
 			}
-			// In cross-repo mode (localRepo != patchRepo), only render child
-			// apps whose source matches patchRepo (the app repo). Infra repo
-			// apps and unrelated repos are only needed as traversal targets,
-			// not for rendering and diffing.
-			if localRepo != patchRepo {
-				sourceURL, _, _ := unstructured.NestedString(child.Yaml.Object, "spec", "source", "repoURL")
-				if sourceURL != "" && !repoURLContains(sourceURL, patchRepo) {
-					log.Debug().
-						Str("parentApp", app.Name).
-						Str("childApp", child.GetLongName()).
-						Str("sourceRepoURL", sourceURL).
-						Msg("Skipping child Application — repoURL does not match --repo (cross-repo filter)")
-					continue
-				}
+			// Cross-repo filter: skip child apps not matching --repo
+			sourceURL, _, _ := unstructured.NestedString(child.Yaml.Object, "spec", "source", "repoURL")
+			if !ShouldRenderInCrossRepoMode(sourceURL, localRepo, patchRepo) {
+				log.Debug().
+					Str("parentApp", app.Name).
+					Str("childApp", child.GetLongName()).
+					Str("sourceRepoURL", sourceURL).
+					Msg("Skipping child Application — repoURL does not match --repo (cross-repo filter)")
+				continue
 			}
 			childApps = append(childApps, *child)
 			log.Debug().
@@ -597,17 +592,15 @@ func renderAppWithChildDiscovery(
 						Msg("⚠️ Could not patch ApplicationSet-generated Application; skipping")
 					continue
 				}
-				// Cross-repo filter: only render apps matching --repo
-				if localRepo != patchRepo {
-					sourceURL, _, _ := unstructured.NestedString(child.Yaml.Object, "spec", "source", "repoURL")
-					if sourceURL != "" && !repoURLContains(sourceURL, patchRepo) {
-						log.Debug().
-							Str("appSet", appSetName).
-							Str("childApp", child.GetLongName()).
-							Str("sourceRepoURL", sourceURL).
-							Msg("Skipping child Application — repoURL does not match --repo or --local-repo (cross-repo filter)")
-						continue
-					}
+				// Cross-repo filter: skip child apps not matching --repo
+				sourceURL, _, _ := unstructured.NestedString(child.Yaml.Object, "spec", "source", "repoURL")
+				if !ShouldRenderInCrossRepoMode(sourceURL, localRepo, patchRepo) {
+					log.Debug().
+						Str("appSet", appSetName).
+						Str("childApp", child.GetLongName()).
+						Str("sourceRepoURL", sourceURL).
+						Msg("Skipping child Application — repoURL does not match --repo (cross-repo filter)")
+					continue
 				}
 				childApps = append(childApps, *child)
 				log.Debug().
