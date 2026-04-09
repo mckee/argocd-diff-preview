@@ -104,6 +104,7 @@ type RawOptions struct {
 	TargetBranch                         string `mapstructure:"target-branch"`
 	Repo                                 string `mapstructure:"repo"`
 	RepoRegex                            string `mapstructure:"repo-regex"`
+	LocalRepo                            string `mapstructure:"local-repo"`
 	OutputFolder                         string `mapstructure:"output-folder"`
 	SecretsFolder                        string `mapstructure:"secrets-folder"`
 	PreinstallFolder                     string `mapstructure:"preinstall-folder"`
@@ -149,14 +150,17 @@ type RawOptions struct {
 // Config is the final, validated, ready-to-use configuration
 type Config struct {
 	// Direct passthrough fields
-	Debug                                bool
-	DryRun                               bool
-	Timeout                              uint64
-	DiffIgnore                           string
-	LineCount                            uint
-	BaseBranch                           string
-	TargetBranch                         string
-	RepoSelector                         repository.Selector
+	Debug        bool
+	DryRun       bool
+	Timeout      uint64
+	DiffIgnore   string
+	LineCount    uint
+	BaseBranch   string
+	TargetBranch string
+	RepoSelector repository.Selector
+	// LocalRepoSelector matches sources streamed from the local base/target
+	// checkouts. It equals RepoSelector unless --local-repo is set.
+	LocalRepoSelector                    repository.Selector
 	OutputFolder                         string
 	SecretsFolder                        string
 	PreinstallFolder                     string
@@ -319,6 +323,7 @@ func Parse() *Config {
 	rootCmd.Flags().StringP("base-branch", "b", DefaultBaseBranch, "Base branch name")
 	rootCmd.Flags().StringP("target-branch", "t", "", "Target branch name (required)")
 	rootCmd.Flags().String("repo", "", "Git repository. Format: OWNER/REPO. Mutually exclusive with --repo-regex")
+	rootCmd.Flags().String("local-repo", "", "Repository checked out in base-branch/target-branch dirs. Controls local file streaming vs remote RPC. Defaults to --repo if not set.")
 	rootCmd.Flags().String("repo-regex", "", "Regex matched against normalized Argo CD repoURL values for templated repository URLs. Mutually exclusive with --repo")
 
 	// Folders
@@ -474,6 +479,10 @@ func (o *RawOptions) ToConfig() (*Config, error) {
 	cfg.RepoSelector, err = o.parseRepositorySelector(cfg.BaseBranch, cfg.TargetBranch)
 	if err != nil {
 		return nil, err
+	}
+	cfg.LocalRepoSelector = cfg.RepoSelector
+	if o.LocalRepo != "" {
+		cfg.LocalRepoSelector = repository.Selector{Repo: o.LocalRepo}
 	}
 
 	// Parse selectors
@@ -751,6 +760,9 @@ func (o *Config) LogConfig() {
 		} else {
 			log.Info().Msgf("✨ - repo: %s", o.RepoSelector.Repo)
 		}
+	}
+	if o.LocalRepoSelector.Repo != "" && o.LocalRepoSelector.Repo != o.RepoSelector.Repo {
+		log.Info().Msgf("✨ - local-repo: %s", o.LocalRepoSelector.Repo)
 	}
 	if o.RepoSelector.Regex != nil {
 		log.Info().Msgf("✨ - repo-regex: %s", o.RepoSelector.Regex.String())

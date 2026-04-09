@@ -332,7 +332,7 @@ func run(cfg *Config) error {
 				cfg.Concurrency,
 				baseApps.SelectedApps,
 				targetApps.SelectedApps,
-				cfg.RepoSelector,
+				cfg.LocalRepoSelector,
 				appSelectionOptions,
 				tempFolder,
 				redirectRevisions,
@@ -346,7 +346,7 @@ func run(cfg *Config) error {
 				cfg.Concurrency,
 				baseApps.SelectedApps,
 				targetApps.SelectedApps,
-				cfg.RepoSelector,
+				cfg.LocalRepoSelector,
 			)
 		}
 	} else {
