@@ -506,6 +506,20 @@ func renderAppWithChildDiscovery(
 					Msg("⚠️ Could not patch child Application; skipping child rendering")
 				continue
 			}
+			// In cross-repo mode (localRepo != patchRepo), only render child
+			// apps whose source matches localRepo or patchRepo. Other apps
+			// (from unrelated repos) would fail to render and produce noise.
+			if localRepo != patchRepo {
+				sourceURL, _, _ := unstructured.NestedString(child.Yaml.Object, "spec", "source", "repoURL")
+				if sourceURL != "" && !repoURLContains(sourceURL, patchRepo) && !repoURLContains(sourceURL, localRepo) {
+					log.Debug().
+						Str("parentApp", app.Name).
+						Str("childApp", child.GetLongName()).
+						Str("sourceRepoURL", sourceURL).
+						Msg("Skipping child Application — repoURL does not match --repo or --local-repo (cross-repo filter)")
+					continue
+				}
+			}
 			childApps = append(childApps, *child)
 			log.Debug().
 				Str("parentApp", app.Name).
@@ -567,6 +581,18 @@ func renderAppWithChildDiscovery(
 						Str("appSet", appSetName).
 						Msg("⚠️ Could not patch ApplicationSet-generated Application; skipping")
 					continue
+				}
+				// Cross-repo filter: only render apps matching --repo or --local-repo
+				if localRepo != patchRepo {
+					sourceURL, _, _ := unstructured.NestedString(child.Yaml.Object, "spec", "source", "repoURL")
+					if sourceURL != "" && !repoURLContains(sourceURL, patchRepo) && !repoURLContains(sourceURL, localRepo) {
+						log.Debug().
+							Str("appSet", appSetName).
+							Str("childApp", child.GetLongName()).
+							Str("sourceRepoURL", sourceURL).
+							Msg("Skipping child Application — repoURL does not match --repo or --local-repo (cross-repo filter)")
+						continue
+					}
 				}
 				childApps = append(childApps, *child)
 				log.Debug().
