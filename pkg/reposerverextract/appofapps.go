@@ -138,7 +138,8 @@ func RenderApplicationsFromBothBranchesWithAppOfApps(
 	maxConcurrency uint,
 	baseApps []argoapplication.ArgoResource,
 	targetApps []argoapplication.ArgoResource,
-	prRepo string,
+	localRepo string,
+	patchRepo string,
 	appSelectionOptions argoapplication.ApplicationSelectionOptions,
 	tempFolder string,
 ) ([]extract.ExtractedApp, []extract.ExtractedApp, time.Duration, []string, error) {
@@ -372,7 +373,7 @@ func RenderApplicationsFromBothBranchesWithAppOfApps(
 			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(remainingTime())*time.Second)
 			defer cancel()
 
-			manifests, childApps, err := renderAppWithChildDiscovery(ctx, repoClient, argocd, item.app, branchFolderByType, branchByType, namespacedScopedResources, creds, prRepo, argocd.Namespace, tempFolder, item.depth)
+			manifests, childApps, err := renderAppWithChildDiscovery(ctx, repoClient, argocd, item.app, branchFolderByType, branchByType, namespacedScopedResources, creds, localRepo, patchRepo, argocd.Namespace, tempFolder, item.depth)
 			if err != nil {
 				results <- renderResult{appName: item.app.Name, err: fmt.Errorf("failed to render app %s: %w", item.app.GetLongName(), err)}
 				return
@@ -463,12 +464,13 @@ func renderAppWithChildDiscovery(
 	branchByType map[git.BranchType]*git.Branch,
 	namespacedScopedResources map[schema.GroupKind]bool,
 	creds *RepoCreds,
-	prRepo string,
+	localRepo string,
+	patchRepo string,
 	argocdNamespace string,
 	tempFolder string,
 	depth int,
 ) ([]unstructured.Unstructured, []argoapplication.ArgoResource, error) {
-	allManifests, err := renderApp(ctx, repoClient, app, branchFolderByType, namespacedScopedResources, creds, prRepo)
+	allManifests, err := renderApp(ctx, repoClient, app, branchFolderByType, namespacedScopedResources, creds, localRepo)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -496,7 +498,7 @@ func renderAppWithChildDiscovery(
 			// Deep copy so PatchApplication mutates the copy, leaving m in
 			// allManifests (the diff) untouched.
 			resource := argoapplication.NewArgoResource(m.DeepCopy(), argoapplication.Application, name, name, fileName, app.Branch)
-			child, err := argoapplication.PatchApplication(argocdNamespace, *resource, branchByType[app.Branch], prRepo, nil)
+			child, err := argoapplication.PatchApplication(argocdNamespace, *resource, branchByType[app.Branch], patchRepo, nil)
 			if err != nil {
 				log.Warn().Err(err).
 					Str("parentApp", app.Name).
@@ -525,7 +527,7 @@ func renderAppWithChildDiscovery(
 			// Deep copy so PatchApplication mutates the copy, leaving m in
 			// allManifests (the diff) untouched.
 			appSetResource := argoapplication.NewArgoResource(m.DeepCopy(), argoapplication.ApplicationSet, appSetName, appSetName, app.FileName, app.Branch)
-			patchedAppSet, err := argoapplication.PatchApplication(argocdNamespace, *appSetResource, branch, prRepo, nil)
+			patchedAppSet, err := argoapplication.PatchApplication(argocdNamespace, *appSetResource, branch, patchRepo, nil)
 			if err != nil {
 				log.Warn().Err(err).
 					Str("parentApp", app.Name).
@@ -558,7 +560,7 @@ func renderAppWithChildDiscovery(
 					continue
 				}
 				resource := argoapplication.NewArgoResource(&genDoc, argoapplication.Application, name, name, breadcrumb, app.Branch)
-				child, err := argoapplication.PatchApplication(argocdNamespace, *resource, branch, prRepo, nil)
+				child, err := argoapplication.PatchApplication(argocdNamespace, *resource, branch, patchRepo, nil)
 				if err != nil {
 					log.Warn().Err(err).
 						Str("parentApp", app.Name).
