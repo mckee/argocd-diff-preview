@@ -10,6 +10,7 @@ import (
 	"github.com/dag-andersen/argocd-diff-preview/pkg/argocd"
 	"github.com/dag-andersen/argocd-diff-preview/pkg/git"
 	"github.com/dag-andersen/argocd-diff-preview/pkg/utils"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 func ConvertAppSetsToAppsInBothBranches(
@@ -19,6 +20,7 @@ func ConvertAppSetsToAppsInBothBranches(
 	baseBranch *git.Branch,
 	targetBranch *git.Branch,
 	repo string,
+	localRepo string,
 	tempFolder string,
 	redirectRevisions []string,
 	debug bool,
@@ -37,6 +39,7 @@ func ConvertAppSetsToAppsInBothBranches(
 		debug,
 		appSelectionOptions,
 		repo,
+		localRepo,
 		redirectRevisions,
 	)
 
@@ -54,6 +57,7 @@ func ConvertAppSetsToAppsInBothBranches(
 		debug,
 		appSelectionOptions,
 		repo,
+		localRepo,
 		redirectRevisions,
 	)
 	if err != nil {
@@ -74,6 +78,7 @@ func processAppSets(
 	debug bool,
 	appSelectionOptions ApplicationSelectionOptions,
 	repo string,
+	localRepo string,
 	redirectRevisions []string,
 ) (*ArgoSelection, error) {
 
@@ -165,6 +170,25 @@ func processAppSets(
 				break
 			}
 		}
+	}
+
+	// In cross-repo mode (localRepo != repo), filter expanded apps to only
+	// keep those whose repoURL matches --repo. This prevents rendering
+	// hundreds of unrelated apps that would fail or produce noise.
+	if localRepo != repo && repo != "" {
+		var filtered []ArgoResource
+		for _, app := range patchedApps {
+			sourceURL, _, _ := unstructured.NestedString(app.Yaml.Object, "spec", "source", "repoURL")
+			if sourceURL != "" && !containsIgnoreCase(sourceURL, repo) {
+				log.Debug().Str("branch", branch.Name).Str(app.Kind.ShortName(), app.GetLongName()).
+					Str("sourceRepoURL", sourceURL).
+					Msg("Skipping expanded Application — repoURL does not match --repo (cross-repo filter)")
+				continue
+			}
+			filtered = append(filtered, app)
+		}
+		log.Info().Str("branch", branch.Name).Msgf("🤖 Cross-repo filter: kept %d of %d expanded Applications", len(filtered), len(patchedApps))
+		patchedApps = filtered
 	}
 
 	return &ArgoSelection{
