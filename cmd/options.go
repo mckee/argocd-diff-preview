@@ -97,6 +97,7 @@ type RawOptions struct {
 	TargetBranch               string `mapstructure:"target-branch"`
 	Repo                       string `mapstructure:"repo"`
 	LocalRepo                  string `mapstructure:"local-repo"`
+	AppRepoDir                 string `mapstructure:"app-repo-dir"`
 	OutputFolder               string `mapstructure:"output-folder"`
 	SecretsFolder              string `mapstructure:"secrets-folder"`
 	CreateCluster              bool   `mapstructure:"create-cluster"`
@@ -147,6 +148,7 @@ type Config struct {
 	TargetBranch               string
 	Repo                       string
 	LocalRepo                  string
+	AppRepoDir                 string
 	OutputFolder               string
 	SecretsFolder              string
 	CreateCluster              bool
@@ -302,6 +304,7 @@ func Parse() *Config {
 	rootCmd.Flags().StringP("target-branch", "t", "", "Target branch name (required)")
 	rootCmd.Flags().String("repo", "", "Git Repository. Format: OWNER/REPO (required)")
 	rootCmd.Flags().String("local-repo", "", "Repository checked out in base-branch/target-branch dirs. Controls local file streaming vs remote RPC. Defaults to --repo if not set.")
+	rootCmd.Flags().String("app-repo-dir", "", "Local directory containing the --repo checkout (e.g. CI workspace). When set, target-branch rendering streams files from this directory instead of fetching remotely.")
 
 	// Folders
 	rootCmd.Flags().StringP("output-folder", "o", DefaultOutputFolder, "Output folder where the diff will be saved")
@@ -420,6 +423,7 @@ func (o *RawOptions) ToConfig() (*Config, error) {
 		OutputBranchManifests:      o.OutputBranchManifests,
 		TraverseAppOfApps:          o.TraverseAppOfApps,
 		LocalRepo:                  o.LocalRepo,
+		AppRepoDir:                 o.AppRepoDir,
 	}
 
 	// Default LocalRepo to Repo when not explicitly set
@@ -660,6 +664,9 @@ func (o *Config) LogConfig() {
 	log.Info().Msgf("✨ - repo: %s", o.Repo)
 	if o.LocalRepo != "" && o.LocalRepo != o.Repo {
 		log.Info().Msgf("✨ - local-repo: %s", o.LocalRepo)
+	}
+	if o.AppRepoDir != "" {
+		log.Info().Msgf("✨ - app-repo-dir: %s", o.AppRepoDir)
 	}
 	log.Info().Msgf("✨ - timeout: %d seconds", o.Timeout)
 	if o.LogFormat != DefaultLogFormat {

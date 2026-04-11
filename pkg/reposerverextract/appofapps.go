@@ -140,6 +140,7 @@ func RenderApplicationsFromBothBranchesWithAppOfApps(
 	targetApps []argoapplication.ArgoResource,
 	localRepo string,
 	patchRepo string,
+	appRepoDir string,
 	appSelectionOptions argoapplication.ApplicationSelectionOptions,
 	tempFolder string,
 ) ([]extract.ExtractedApp, []extract.ExtractedApp, time.Duration, []string, error) {
@@ -387,7 +388,7 @@ func RenderApplicationsFromBothBranchesWithAppOfApps(
 			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(remainingTime())*time.Second)
 			defer cancel()
 
-			manifests, childApps, err := renderAppWithChildDiscovery(ctx, repoClient, argocd, item.app, branchFolderByType, branchByType, namespacedScopedResources, creds, localRepo, patchRepo, argocd.Namespace, tempFolder, item.depth)
+			manifests, childApps, err := renderAppWithChildDiscovery(ctx, repoClient, argocd, item.app, branchFolderByType, branchByType, namespacedScopedResources, creds, localRepo, patchRepo, appRepoDir, argocd.Namespace, tempFolder, item.depth)
 			if err != nil {
 				results <- renderResult{appName: item.app.Name, err: fmt.Errorf("failed to render app %s: %w", item.app.GetLongName(), err)}
 				return
@@ -480,11 +481,12 @@ func renderAppWithChildDiscovery(
 	creds *RepoCreds,
 	localRepo string,
 	patchRepo string,
+	appRepoDir string,
 	argocdNamespace string,
 	tempFolder string,
 	depth int,
 ) ([]unstructured.Unstructured, []argoapplication.ArgoResource, error) {
-	allManifests, err := renderApp(ctx, repoClient, app, branchFolderByType, namespacedScopedResources, creds, localRepo)
+	allManifests, err := renderApp(ctx, repoClient, app, branchFolderByType, namespacedScopedResources, creds, localRepo, patchRepo, appRepoDir)
 	if err != nil {
 		return nil, nil, err
 	}

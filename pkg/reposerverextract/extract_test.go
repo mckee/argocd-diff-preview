@@ -92,7 +92,7 @@ spec:
 	require.Empty(t, refSources)
 	assert.False(t, hasMultipleSources)
 
-	req, streamDir, cleanup, err := buildManifestRequestForSource(app, contentSources[0], refSources, hasMultipleSources, branchFolder, nil, "")
+	req, streamDir, cleanup, err := buildManifestRequestForSource(app, contentSources[0], refSources, hasMultipleSources, branchFolder, nil, "", "", "")
 	require.NoError(t, err)
 	if cleanup != nil {
 		defer cleanup()
@@ -133,7 +133,7 @@ spec:
 	require.NoError(t, err)
 	require.Len(t, contentSources, 1)
 
-	req, streamDir, cleanup, err := buildManifestRequestForSource(app, contentSources[0], refSources, hasMultipleSources, branchFolder, nil, "")
+	req, streamDir, cleanup, err := buildManifestRequestForSource(app, contentSources[0], refSources, hasMultipleSources, branchFolder, nil, "", "", "")
 	require.NoError(t, err)
 	if cleanup != nil {
 		defer cleanup()
@@ -200,7 +200,7 @@ spec:
 	require.Len(t, contentSources, 1, "only the chart source is a content source")
 	require.Len(t, refSources, 1)
 
-	req, streamDir, cleanup, err := buildManifestRequestForSource(app, contentSources[0], refSources, hasMultipleSources, branchFolder, nil, "")
+	req, streamDir, cleanup, err := buildManifestRequestForSource(app, contentSources[0], refSources, hasMultipleSources, branchFolder, nil, "", "", "")
 	require.NoError(t, err)
 	if cleanup != nil {
 		defer cleanup()
@@ -281,7 +281,7 @@ spec:
 	require.Len(t, contentSources, 1)
 	require.Len(t, refSources, 1)
 
-	req, streamDir, cleanup, err := buildManifestRequestForSource(app, contentSources[0], refSources, hasMultipleSources, branchFolder, nil, "")
+	req, streamDir, cleanup, err := buildManifestRequestForSource(app, contentSources[0], refSources, hasMultipleSources, branchFolder, nil, "", "", "")
 	require.NoError(t, err)
 	require.NotEmpty(t, streamDir, "local chart with refs must stream a temp dir")
 	defer cleanup()
@@ -340,7 +340,7 @@ spec:
 	require.Len(t, contentSources, 1)
 	require.Len(t, refSources, 1)
 
-	req, streamDir, cleanup, err := buildManifestRequestForSource(app, contentSources[0], refSources, hasMultipleSources, branchFolder, nil, "")
+	req, streamDir, cleanup, err := buildManifestRequestForSource(app, contentSources[0], refSources, hasMultipleSources, branchFolder, nil, "", "", "")
 	require.NoError(t, err)
 	if cleanup != nil {
 		defer cleanup()
@@ -424,7 +424,7 @@ spec:
 	// Capture requests so we can verify per-source paths without duplicate calls.
 	reqs := make([]struct{ path string }, len(contentSources))
 	for i, cs := range contentSources {
-		req, streamDir, cleanup, buildErr := buildManifestRequestForSource(app, cs, refSources, hasMultipleSources, branchFolder, nil, "")
+		req, streamDir, cleanup, buildErr := buildManifestRequestForSource(app, cs, refSources, hasMultipleSources, branchFolder, nil, "", "", "")
 		require.NoError(t, buildErr, "content source %d should not error", i)
 		if cleanup != nil {
 			defer cleanup()
@@ -483,7 +483,7 @@ spec:
 	require.Len(t, contentSources, 1)
 	require.Empty(t, refSources)
 
-	req, streamDir, cleanup, err := buildManifestRequestForSource(app, contentSources[0], refSources, hasMultipleSources, branchFolder, nil, prRepo)
+	req, streamDir, cleanup, err := buildManifestRequestForSource(app, contentSources[0], refSources, hasMultipleSources, branchFolder, nil, prRepo, "", "")
 	require.NoError(t, err)
 	if cleanup != nil {
 		defer cleanup()
@@ -532,7 +532,7 @@ spec:
 	require.NoError(t, err)
 	require.Len(t, contentSources, 1)
 
-	req, streamDir, cleanup, err := buildManifestRequestForSource(app, contentSources[0], refSources, hasMultipleSources, branchFolder, nil, prRepo)
+	req, streamDir, cleanup, err := buildManifestRequestForSource(app, contentSources[0], refSources, hasMultipleSources, branchFolder, nil, prRepo, "", "")
 	require.NoError(t, err)
 	if cleanup != nil {
 		defer cleanup()
@@ -541,6 +541,153 @@ spec:
 	// Same repo - should stream the branch folder, not use remote RPC.
 	assert.Equal(t, branchFolder, streamDir, "same-repo source must still stream locally even when prRepo is set")
 	assert.Equal(t, "apps/my-app", req.ApplicationSource.Path)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 10. Cross-repo source with --app-repo-dir on target branch → streams from appRepoDir
+//
+//	When --app-repo-dir is set and the source matches --repo (patchRepo),
+//	target-branch rendering should stream files from the app repo directory
+//	instead of falling back to remote RPC. This avoids the CI ArgoCD needing
+//	to resolve MR branch names for the app repo.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+func TestBuildManifestRequest_AppRepoDir_TargetBranch_StreamsLocally(t *testing.T) {
+	// localRepo is the infrastructure repo (checked out in base-branch/target-branch).
+	// patchRepo is the app repo being diffed.
+	prRepo := "sidenio/infrastructure"
+	patchRepo := "sidenio/oc-go/cert-manager-webhook-siden"
+	branchFolder := t.TempDir() // infra repo checkout
+
+	// Create an app repo dir with the Helm chart
+	appRepoDir := makeBranchFolder(t, "build/helm")
+
+	app := makeApp(t, `
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager-webhook-siden-dev
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://gitlab.com/sidenio/oc-go/cert-manager-webhook-siden.git
+    path: build/helm
+    targetRevision: SRE-1073/canary-overhaul
+  destination:
+    server: https://dev.fake.local
+    namespace: system
+`)
+	// Override branch to Target (makeApp defaults to Base)
+	app.Branch = git.Target
+
+	contentSources, refSources, hasMultipleSources, err := splitSources(app)
+	require.NoError(t, err)
+	require.Len(t, contentSources, 1)
+
+	req, streamDir, cleanup, err := buildManifestRequestForSource(app, contentSources[0], refSources, hasMultipleSources, branchFolder, nil, prRepo, patchRepo, appRepoDir)
+	require.NoError(t, err)
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	// CRITICAL: must stream from appRepoDir, NOT use remote RPC.
+	assert.Equal(t, appRepoDir, streamDir,
+		"target-branch source matching --repo with --app-repo-dir must stream from app repo dir")
+	assert.Equal(t, "build/helm", req.ApplicationSource.Path)
+	assert.Equal(t, "SRE-1073/canary-overhaul", req.Revision)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 11. Cross-repo source with --app-repo-dir on base branch → uses remote RPC
+//
+//	Base-branch rendering should NOT use --app-repo-dir because the directory
+//	contains the MR head, not the merge base. Base-branch apps keep their
+//	original targetRevision (a git tag) and use remote RPC.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+func TestBuildManifestRequest_AppRepoDir_BaseBranch_UsesRemoteRPC(t *testing.T) {
+	prRepo := "sidenio/infrastructure"
+	patchRepo := "sidenio/oc-go/cert-manager-webhook-siden"
+	branchFolder := t.TempDir()
+	appRepoDir := makeBranchFolder(t, "build/helm")
+
+	app := makeApp(t, `
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager-webhook-siden-dev
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://gitlab.com/sidenio/oc-go/cert-manager-webhook-siden.git
+    path: build/helm
+    targetRevision: argocd-target-development
+  destination:
+    server: https://dev.fake.local
+    namespace: system
+`)
+	// Base branch (default from makeApp) — keep it as git.Base
+
+	contentSources, refSources, hasMultipleSources, err := splitSources(app)
+	require.NoError(t, err)
+	require.Len(t, contentSources, 1)
+
+	req, streamDir, cleanup, err := buildManifestRequestForSource(app, contentSources[0], refSources, hasMultipleSources, branchFolder, nil, prRepo, patchRepo, appRepoDir)
+	require.NoError(t, err)
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	// Base branch must use remote RPC (streamDir empty) so the repo server
+	// fetches the content at the original git tag revision.
+	assert.Empty(t, streamDir,
+		"base-branch source must use remote RPC even when --app-repo-dir is set")
+	assert.Equal(t, "argocd-target-development", req.Revision)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 12. Cross-repo source without --app-repo-dir → still uses remote RPC (no regression)
+//
+// ─────────────────────────────────────────────────────────────────────────────
+func TestBuildManifestRequest_NoAppRepoDir_CrossRepo_UsesRemoteRPC(t *testing.T) {
+	prRepo := "sidenio/infrastructure"
+	patchRepo := "sidenio/oc-go/cert-manager-webhook-siden"
+	branchFolder := t.TempDir()
+
+	app := makeApp(t, `
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager-webhook-siden-dev
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://gitlab.com/sidenio/oc-go/cert-manager-webhook-siden.git
+    path: build/helm
+    targetRevision: SRE-1073/canary-overhaul
+  destination:
+    server: https://dev.fake.local
+    namespace: system
+`)
+	app.Branch = git.Target
+
+	contentSources, refSources, hasMultipleSources, err := splitSources(app)
+	require.NoError(t, err)
+	require.Len(t, contentSources, 1)
+
+	// No appRepoDir — should fall back to remote RPC.
+	req, streamDir, cleanup, err := buildManifestRequestForSource(app, contentSources[0], refSources, hasMultipleSources, branchFolder, nil, prRepo, patchRepo, "")
+	require.NoError(t, err)
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	assert.Empty(t, streamDir,
+		"without --app-repo-dir, cross-repo source must use remote RPC")
+	assert.Equal(t, "SRE-1073/canary-overhaul", req.Revision)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -707,7 +854,7 @@ spec:
 	require.NoError(t, err)
 	require.Len(t, contentSources, 1)
 
-	req, streamDir, cleanup, err := buildManifestRequestForSource(app, contentSources[0], refSources, hasMultipleSources, branchFolder, nil, prRepo)
+	req, streamDir, cleanup, err := buildManifestRequestForSource(app, contentSources[0], refSources, hasMultipleSources, branchFolder, nil, prRepo, "", "")
 	require.NoError(t, err)
 	if cleanup != nil {
 		defer cleanup()

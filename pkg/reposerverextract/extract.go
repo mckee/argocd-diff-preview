@@ -185,7 +185,7 @@ func RenderApplicationsFromBothBranches(
 			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(remainingTime())*time.Second)
 			defer cancel()
 
-			manifests, err := renderApp(ctx, repoClient, app, branchFolderByType, namespacedScopedResources, creds, prRepo)
+			manifests, err := renderApp(ctx, repoClient, app, branchFolderByType, namespacedScopedResources, creds, prRepo, "", "")
 			if err != nil {
 				results <- result{appName: app.Name, err: fmt.Errorf("failed to render app %s: %w", app.GetLongName(), err)}
 				return
@@ -277,6 +277,8 @@ func renderApp(
 	namespacedScopedResources map[schema.GroupKind]bool,
 	creds *RepoCreds,
 	prRepo string,
+	patchRepo string,
+	appRepoDir string,
 ) ([]unstructured.Unstructured, error) {
 	branchFolder, ok := branchFolderByType[app.Branch]
 	if !ok {
@@ -291,7 +293,7 @@ func renderApp(
 	var allManifestStrings []string
 
 	for i, contentSource := range contentSources {
-		request, streamDir, cleanup, err := buildManifestRequestForSource(app, contentSource, refSources, hasMultipleSources, branchFolder, creds, prRepo)
+		request, streamDir, cleanup, err := buildManifestRequestForSource(app, contentSource, refSources, hasMultipleSources, branchFolder, creds, prRepo, patchRepo, appRepoDir)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build manifest request for content source %d: %w", i, err)
 		}
@@ -529,6 +531,8 @@ func buildManifestRequestForSource(
 	branchFolder string,
 	creds *RepoCreds,
 	prRepo string,
+	patchRepo string,
+	appRepoDir string,
 ) (request *repoapiclient.ManifestRequest, streamDir string, cleanup func(), err error) {
 	obj := app.Yaml.Object
 
@@ -572,7 +576,32 @@ func buildManifestRequestForSource(
 		// repository than the PR repo. Those files are not checked out
 		// locally, so we cannot stream them. Fall back to the remote
 		// GenerateManifest RPC and let the repo server fetch them itself.
+		//
+		// Exception: if --app-repo-dir is set and the source matches the
+		// patch repo (--repo), stream from the app repo directory instead.
+		// This avoids the CI ArgoCD needing to resolve MR branch names
+		// for the app repo, which typically fails because the repo server
+		// hasn't fetched those branches.
 		if prRepo != "" && !repoURLContains(primarySource.RepoURL, prRepo) {
+			if appRepoDir != "" && patchRepo != "" && repoURLContains(primarySource.RepoURL, patchRepo) && app.Branch == git.Target {
+				log.Debug().
+					Str("App", app.GetLongName()).
+					Str("sourceRepoURL", primarySource.RepoURL).
+					Str("patchRepo", patchRepo).
+					Str("appRepoDir", appRepoDir).
+					Msg("Source matches --repo and --app-repo-dir is set - streaming from app repo dir (target branch)")
+				request = &repoapiclient.ManifestRequest{
+					Repo:               creds.GetRepo(primarySource.RepoURL),
+					Repos:              creds.HelmRepos(&primarySource),
+					HelmRepoCreds:      creds.HelmRepoCreds(&primarySource),
+					Revision:           primarySource.TargetRevision,
+					AppName:            app.Id,
+					Namespace:          namespace,
+					ApplicationSource:  &primarySource,
+					HasMultipleSources: hasMultipleSources,
+				}
+				return request, appRepoDir, nil, nil
+			}
 			log.Debug().
 				Str("App", app.GetLongName()).
 				Str("sourceRepoURL", primarySource.RepoURL).
