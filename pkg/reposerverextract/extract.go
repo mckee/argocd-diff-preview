@@ -202,7 +202,7 @@ func RenderApplicationsFromBothBranches(
 			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(remainingTime())*time.Second)
 			defer cancel()
 
-			manifests, err := renderApp(ctx, repoClient, app, branchFolderByType, clusterScopedResources, creds, &repoSelector, kubeVersion, apiVersions, kustomizeBuildOptions, helmChartPuller{})
+			manifests, err := renderApp(ctx, repoClient, app, branchFolderByType, clusterScopedResources, creds, &repoSelector, nil, "", kubeVersion, apiVersions, kustomizeBuildOptions, helmChartPuller{})
 			if err != nil {
 				results <- result{appName: app.Name, err: fmt.Errorf("failed to render app %s: %w", app.GetLongName(), err)}
 				return
@@ -294,6 +294,8 @@ func renderApp(
 	clusterScopedResources map[schema.GroupKind]bool,
 	creds *RepoCreds,
 	repoSelector *repository.Selector,
+	patchSelector *repository.Selector,
+	appRepoDir string,
 	kubeVersion string,
 	apiVersions []string,
 	kustomizeBuildOptions string,
@@ -321,6 +323,8 @@ func renderApp(
 			creds,
 			manifestRequestRenderContext{
 				repoSelector:          repoSelector,
+				patchSelector:         patchSelector,
+				appRepoDir:            appRepoDir,
 				kubeVersion:           kubeVersion,
 				apiVersions:           apiVersions,
 				kustomizeBuildOptions: kustomizeBuildOptions,
@@ -555,8 +559,13 @@ func splitSources(app argoapplication.ArgoResource) (
 // strings or slices can be accidentally swapped at call sites.
 type manifestRequestRenderContext struct {
 	repoSelector *repository.Selector
-	kubeVersion  string
-	apiVersions  []string
+	// patchSelector (--repo) and appRepoDir (--app-repo-dir) let target-branch
+	// sources from the app repo stream from a local checkout of it instead of
+	// a remote RPC, which cannot resolve unfetched MR branch names.
+	patchSelector *repository.Selector
+	appRepoDir    string
+	kubeVersion   string
+	apiVersions   []string
 	// kustomizeBuildOptions holds the global `kustomize.buildOptions` value
 	// from argocd-cm. Argo CD's API server passes it to the repo server on
 	// every request; the repo server never reads the ConfigMap itself.
@@ -641,6 +650,33 @@ func buildManifestRequestForSource(
 		// locally, so we cannot stream them. Fall back to the remote
 		// GenerateManifest RPC and let the repo server fetch them itself.
 		if !renderContext.repoSelector.Matches(primarySource.RepoURL) {
+			// Exception: with --app-repo-dir, a target-branch source from the app
+			// repo (--repo) streams from that checkout. Base-branch sources keep
+			// using remote RPC: the checkout holds the MR head, not the merge base.
+			if renderContext.appRepoDir != "" && renderContext.patchSelector != nil &&
+				renderContext.patchSelector.Matches(primarySource.RepoURL) && app.Branch == git.Target {
+				streamDir, cleanup, err := buildStreamDirForLocalSource(renderContext.appRepoDir, primarySource)
+				if err == nil {
+					log.Debug().
+						Str("App", app.GetLongName()).
+						Str("sourceRepoURL", primarySource.RepoURL).
+						Str("appRepoDir", renderContext.appRepoDir).
+						Msg("Source matches --repo and --app-repo-dir is set - streaming from app repo dir (target branch)")
+					requestSource := primarySource
+					if streamDir != renderContext.appRepoDir {
+						requestSource.Path = ""
+					}
+					return newManifestRequest(&requestSource), streamDir, cleanup, nil
+				}
+				if !isLocalSourceMissing(err) {
+					return nil, "", nil, err
+				}
+				log.Warn().
+					Str("App", app.GetLongName()).
+					Str("sourcePath", primarySource.Path).
+					Str("appRepoDir", renderContext.appRepoDir).
+					Msg("⚠️ --repo source is not present in --app-repo-dir - using remote RPC")
+			}
 			log.Debug().
 				Str("App", app.GetLongName()).
 				Str("sourceRepoURL", primarySource.RepoURL).

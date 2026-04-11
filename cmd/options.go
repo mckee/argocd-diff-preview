@@ -105,6 +105,7 @@ type RawOptions struct {
 	Repo                                 string `mapstructure:"repo"`
 	RepoRegex                            string `mapstructure:"repo-regex"`
 	LocalRepo                            string `mapstructure:"local-repo"`
+	AppRepoDir                           string `mapstructure:"app-repo-dir"`
 	OutputFolder                         string `mapstructure:"output-folder"`
 	SecretsFolder                        string `mapstructure:"secrets-folder"`
 	PreinstallFolder                     string `mapstructure:"preinstall-folder"`
@@ -161,6 +162,7 @@ type Config struct {
 	// LocalRepoSelector matches sources streamed from the local base/target
 	// checkouts. It equals RepoSelector unless --local-repo is set.
 	LocalRepoSelector                    repository.Selector
+	AppRepoDir                           string
 	OutputFolder                         string
 	SecretsFolder                        string
 	PreinstallFolder                     string
@@ -323,6 +325,7 @@ func Parse() *Config {
 	rootCmd.Flags().StringP("base-branch", "b", DefaultBaseBranch, "Base branch name")
 	rootCmd.Flags().StringP("target-branch", "t", "", "Target branch name (required)")
 	rootCmd.Flags().String("repo", "", "Git repository. Format: OWNER/REPO. Mutually exclusive with --repo-regex")
+	rootCmd.Flags().String("app-repo-dir", "", "Local directory containing the --repo checkout (e.g. CI workspace). When set, target-branch rendering streams files from this directory instead of fetching remotely.")
 	rootCmd.Flags().String("local-repo", "", "Repository checked out in base-branch/target-branch dirs. Controls local file streaming vs remote RPC. Defaults to --repo if not set.")
 	rootCmd.Flags().String("repo-regex", "", "Regex matched against normalized Argo CD repoURL values for templated repository URLs. Mutually exclusive with --repo")
 
@@ -484,6 +487,7 @@ func (o *RawOptions) ToConfig() (*Config, error) {
 	if o.LocalRepo != "" {
 		cfg.LocalRepoSelector = repository.Selector{Repo: o.LocalRepo}
 	}
+	cfg.AppRepoDir = o.AppRepoDir
 
 	// Parse selectors
 	cfg.Selectors, err = o.parseSelectors()
@@ -760,6 +764,9 @@ func (o *Config) LogConfig() {
 		} else {
 			log.Info().Msgf("✨ - repo: %s", o.RepoSelector.Repo)
 		}
+	}
+	if o.AppRepoDir != "" {
+		log.Info().Msgf("✨ - app-repo-dir: %s", o.AppRepoDir)
 	}
 	if o.LocalRepoSelector.Repo != "" && o.LocalRepoSelector.Repo != o.RepoSelector.Repo {
 		log.Info().Msgf("✨ - local-repo: %s", o.LocalRepoSelector.Repo)

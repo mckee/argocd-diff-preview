@@ -1893,3 +1893,126 @@ func TestCopyDir_FollowsDirectorySymlink(t *testing.T) {
 	assert.Equal(t, "SELECT 1;", string(got))
 	assert.NoDirExists(t, filepath.Join(dst, ".git"), "Git metadata must not be copied into staging directories")
 }
+
+// --app-repo-dir: a target-branch source matching --repo streams from the app
+// repo checkout instead of remote RPC.
+func TestBuildManifestRequest_AppRepoDir_TargetBranch_StreamsLocally(t *testing.T) {
+	branchFolder := t.TempDir() // infra repo checkout
+	appRepoDir := makeBranchFolder(t, "build/helm")
+
+	app := makeApp(t, `
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager-webhook-siden-dev
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://gitlab.com/sidenio/oc-go/cert-manager-webhook-siden.git
+    path: build/helm
+    targetRevision: SRE-1073/canary-overhaul
+  destination:
+    server: https://dev.fake.local
+    namespace: system
+`)
+	app.Branch = git.Target
+
+	contentSources, refSources, hasMultipleSources, err := splitSources(app)
+	require.NoError(t, err)
+	require.Len(t, contentSources, 1)
+
+	req, streamDir, cleanup, err := buildManifestRequestForSource(app, contentSources[0], refSources, hasMultipleSources, branchFolder, nil, manifestRequestRenderContext{
+		repoSelector:  testRepoSelector(t, "sidenio/infrastructure"),
+		patchSelector: testRepoSelector(t, "sidenio/oc-go/cert-manager-webhook-siden"),
+		appRepoDir:    appRepoDir,
+	})
+	require.NoError(t, err)
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	require.NotEmpty(t, streamDir, "target-branch source matching --repo with --app-repo-dir must not use remote RPC")
+	assert.True(t, strings.HasPrefix(streamDir, appRepoDir), "stream dir %q must be inside --app-repo-dir %q", streamDir, appRepoDir)
+	assert.Equal(t, "SRE-1073/canary-overhaul", req.Revision)
+}
+
+// --app-repo-dir is ignored on the base branch: the checkout holds the MR head,
+// not the merge base, so base-branch sources keep using remote RPC.
+func TestBuildManifestRequest_AppRepoDir_BaseBranch_UsesRemoteRPC(t *testing.T) {
+	branchFolder := t.TempDir()
+	appRepoDir := makeBranchFolder(t, "build/helm")
+
+	app := makeApp(t, `
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager-webhook-siden-dev
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://gitlab.com/sidenio/oc-go/cert-manager-webhook-siden.git
+    path: build/helm
+    targetRevision: argocd-target-development
+  destination:
+    server: https://dev.fake.local
+    namespace: system
+`)
+
+	contentSources, refSources, hasMultipleSources, err := splitSources(app)
+	require.NoError(t, err)
+	require.Len(t, contentSources, 1)
+
+	req, streamDir, cleanup, err := buildManifestRequestForSource(app, contentSources[0], refSources, hasMultipleSources, branchFolder, nil, manifestRequestRenderContext{
+		repoSelector:  testRepoSelector(t, "sidenio/infrastructure"),
+		patchSelector: testRepoSelector(t, "sidenio/oc-go/cert-manager-webhook-siden"),
+		appRepoDir:    appRepoDir,
+	})
+	require.NoError(t, err)
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	assert.Empty(t, streamDir, "base-branch source must use remote RPC even when --app-repo-dir is set")
+	assert.Equal(t, "argocd-target-development", req.Revision)
+}
+
+// Without --app-repo-dir a cross-repo source still uses remote RPC.
+func TestBuildManifestRequest_NoAppRepoDir_CrossRepo_UsesRemoteRPC(t *testing.T) {
+	branchFolder := t.TempDir()
+
+	app := makeApp(t, `
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager-webhook-siden-dev
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://gitlab.com/sidenio/oc-go/cert-manager-webhook-siden.git
+    path: build/helm
+    targetRevision: SRE-1073/canary-overhaul
+  destination:
+    server: https://dev.fake.local
+    namespace: system
+`)
+	app.Branch = git.Target
+
+	contentSources, refSources, hasMultipleSources, err := splitSources(app)
+	require.NoError(t, err)
+	require.Len(t, contentSources, 1)
+
+	req, streamDir, cleanup, err := buildManifestRequestForSource(app, contentSources[0], refSources, hasMultipleSources, branchFolder, nil, manifestRequestRenderContext{
+		repoSelector:  testRepoSelector(t, "sidenio/infrastructure"),
+		patchSelector: testRepoSelector(t, "sidenio/oc-go/cert-manager-webhook-siden"),
+	})
+	require.NoError(t, err)
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	assert.Empty(t, streamDir, "without --app-repo-dir, cross-repo source must use remote RPC")
+	assert.Equal(t, "SRE-1073/canary-overhaul", req.Revision)
+}

@@ -144,6 +144,7 @@ func RenderApplicationsFromBothBranchesWithAppOfApps(
 	// targetRevision rewritten; repoSelector (--local-repo) only decides which
 	// sources are streamed from the local checkouts.
 	patchSelector repository.Selector,
+	appRepoDir string,
 	appSelectionOptions argoapplication.ApplicationSelectionOptions,
 	tempFolder string,
 	redirectRevisions []string,
@@ -404,7 +405,7 @@ func RenderApplicationsFromBothBranchesWithAppOfApps(
 			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(remainingTime())*time.Second)
 			defer cancel()
 
-			manifests, childApps, err := renderAppWithChildDiscovery(ctx, repoClient, argocd, item.app, branchFolderByType, branchByType, clusterScopedResources, creds, &repoSelector, &patchSelector, argocd.Namespace, tempFolder, item.depth, kubeVersion, apiVersions, kustomizeBuildOptions, redirectRevisions)
+			manifests, childApps, err := renderAppWithChildDiscovery(ctx, repoClient, argocd, item.app, branchFolderByType, branchByType, clusterScopedResources, creds, &repoSelector, &patchSelector, appRepoDir, argocd.Namespace, tempFolder, item.depth, kubeVersion, apiVersions, kustomizeBuildOptions, redirectRevisions)
 			if err != nil {
 				results <- renderResult{appName: item.app.Name, err: fmt.Errorf("failed to render app %s: %w", item.app.GetLongName(), err)}
 				return
@@ -520,6 +521,7 @@ func renderAppWithChildDiscovery(
 	creds *RepoCreds,
 	repoSelector *repository.Selector,
 	patchSelector *repository.Selector,
+	appRepoDir string,
 	argocdNamespace string,
 	tempFolder string,
 	depth int,
@@ -528,7 +530,7 @@ func renderAppWithChildDiscovery(
 	kustomizeBuildOptions string,
 	redirectRevisions []string,
 ) ([]unstructured.Unstructured, []argoapplication.ArgoResource, error) {
-	allManifests, err := renderApp(ctx, repoClient, app, branchFolderByType, clusterScopedResources, creds, repoSelector, kubeVersion, apiVersions, kustomizeBuildOptions, helmChartPuller{})
+	allManifests, err := renderApp(ctx, repoClient, app, branchFolderByType, clusterScopedResources, creds, repoSelector, patchSelector, appRepoDir, kubeVersion, apiVersions, kustomizeBuildOptions, helmChartPuller{})
 	if err != nil {
 		return nil, nil, err
 	}
